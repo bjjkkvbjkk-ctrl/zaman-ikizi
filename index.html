@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07090d">
+<title>Zaman İkizi</title>
+<style>
+  * { -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #07090d;
+    display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  canvas {
+    display: block;
+    border-radius: 10px;
+    box-shadow: 0 0 60px rgba(76,201,240,0.15);
+    touch-action: none;
+  }
+  #touch {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+  }
+  #touch.on { display: block; }
+  .btn {
+    position: absolute;
+    pointer-events: auto;
+    border-radius: 50%;
+    background: rgba(76,201,240,0.12);
+    border: 2px solid rgba(76,201,240,0.45);
+    color: #4cc9f0;
+    font-size: 34px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.08s, transform 0.08s;
+  }
+  .btn.active {
+    background: rgba(76,201,240,0.35);
+    transform: scale(0.94);
+  }
+  #btnLeft  { left: 18px;  bottom: 24px; width: 78px; height: 78px; }
+  #btnRight { left: 110px; bottom: 24px; width: 78px; height: 78px; }
+  #btnJump  { right: 22px; bottom: 34px; width: 92px; height: 92px;
+              background: rgba(61,220,132,0.14);
+              border-color: rgba(61,220,132,0.5);
+              color: #3ddc84; font-size: 26px; }
+  #btnJump.active { background: rgba(61,220,132,0.38); }
+  #btnReset { right: 22px; top: 18px; width: 54px; height: 54px;
+              font-size: 18px; background: rgba(229,72,77,0.12);
+              border-color: rgba(229,72,77,0.45); color: #e5484d; }
+  #btnReset.active { background: rgba(229,72,77,0.35); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="touch">
+  <div class="btn" id="btnLeft">◀</div>
+  <div class="btn" id="btnRight">▶</div>
+  <div class="btn" id="btnJump">ZIPLA</div>
+  <div class="btn" id="btnReset">R</div>
+</div>
+<script>
+(() => {
+"use strict";
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 900, H = 540;
+
+const GRAV = 0.65;
+const MOVE = 3.6;
+const JUMP = -12.6;
+const MAXFALL = 16;
+const PW = 24, PH = 32;
+const FPS = 60;
+
+const GHOST_COLORS = ['#ff6b9d', '#ffd166', '#b388ff', '#7bed9f', '#ff9f68'];
+
+const LEVELS = [
+  {
+    name: "Isınma",
+    time: 6,
+    spawn: { x: 40, y: 460 },
+    platforms: [{ x: 0, y: 500, w: 900, h: 40 }],
+    buttons: [],
+    doors: [],
+    exit: { x: 830, y: 440, w: 40, h: 60 }
+  },
+  {
+    name: "İki Beden",
+    time: 10,
+    spawn: { x: 40, y: 460 },
+    platforms: [{ x: 0, y: 500, w: 900, h: 40 }],
+    buttons: [{ x: 180, y: 484, w: 48, h: 16, door: 0 }],
+    doors: [{ x: 560, y: 380, w: 20, h: 120 }],
+    exit: { x: 820, y: 440, w: 40, h: 60 }
+  },
+  {
+    name: "Zincir",
+    time: 12,
+    spawn: { x: 40, y: 460 },
+    platforms: [{ x: 0, y: 500, w: 900, h: 40 }],
+    buttons: [
+      { x: 120, y: 484, w: 48, h: 16, door: 0 },
+      { x: 460, y: 484, w: 48, h: 16, door: 1 }
+    ],
+    doors: [
+      { x: 300, y: 380, w: 20, h: 120 },
+      { x: 660, y: 380, w: 20, h: 120 }
+    ],
+    exit: { x: 830, y: 440, w: 40, h: 60 }
+  },
+  {
+    name: "Sıçrama",
+    time: 14,
+    spawn: { x: 40, y: 460 },
+    platforms: [
+      { x: 0, y: 500, w: 320, h: 40 },
+      { x: 380, y: 500, w: 200, h: 40 },
+      { x: 640, y: 500, w: 260, h: 40 },
+      { x: 380, y: 360, w: 90, h: 18 }
+    ],
+    buttons: [
+      { x: 150, y: 484, w: 48, h: 16, door: 0 },
+      { x: 700, y: 484, w: 48, h: 16, door: 1 }
+    ],
+    doors: [
+      { x: 440, y: 380, w: 18, h: 120 },
+      { x: 620, y: 380, w: 18, h: 120 }
+    ],
+    exit: { x: 840, y: 300, w: 40, h: 60 }
+  }
+];
+
+const state = {
+  levelIndex: 0,
+  player: null,
+  ghosts: [],
+  recording: [],
+  frame: 0,
+  timer: 0,
+  freeze: 0,
+  pressed: [],
+  doorOpen: [],
+  status: 'playing'
+};
+
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function makePlayer(lvl) {
+  return {
+    x: lvl.spawn.x, y: lvl.spawn.y,
+    w: PW, h: PH,
+    vx: 0, vy: 0,
+    onGround: false,
+    facing: 1
+  };
+}
+
+const keys = {};
+let jumpQueued = false;
+
+function pressKey(k) {
+  keys[k] = true;
+  if (['arrowup','w',' '].includes(k)) jumpQueued = true;
+}
+function releaseKey(k) { keys[k] = false; }
+
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (['arrowleft','arrowright','arrowup',' '].includes(k)) e.preventDefault();
+  if (!e.repeat && ['arrowup','w',' '].includes(k)) jumpQueued = true;
+  keys[k] = true;
+  if (k === 'r') resetRun();
+  if (k === 'n' && state.status === 'allcomplete') { state.status = 'playing'; startLevel(0); }
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+function readInput() {
+  const input = {
+    left: !!(keys['arrowleft'] || keys['a']),
+    right: !!(keys['arrowright'] || keys['d']),
+    jump: jumpQueued
+  };
+  jumpQueued = false;
+  return input;
+}
+
+const touchLayer = document.getElementById('touch');
+
+function bindHold(el, onDown, onUp) {
+  const down = e => { e.preventDefault(); el.classList.add('active'); onDown(); };
+  const up = e => { e.preventDefault(); el.classList.remove('active'); onUp(); };
+  el.addEventListener('touchstart', down, { passive: false });
+  el.addEventListener('touchend', up, { passive: false });
+  el.addEventListener('touchcancel', up, { passive: false });
+  el.addEventListener('mousedown', down);
+  el.addEventListener('mouseup', up);
+  el.addEventListener('mouseleave', up);
+}
+
+bindHold(document.getElementById('btnLeft'),
+  () => pressKey('arrowleft'),
+  () => releaseKey('arrowleft'));
+bindHold(document.getElementById('btnRight'),
+  () => pressKey('arrowright'),
+  () => releaseKey('arrowright'));
+bindHold(document.getElementById('btnJump'),
+  () => pressKey(' '),
+  () => releaseKey(' '));
+
+const btnReset = document.getElementById('btnReset');
+btnReset.addEventListener('touchstart', e => {
+  e.preventDefault();
+  btnReset.classList.add('active');
+  if (state.status === 'allcomplete') { state.status = 'playing'; startLevel(0); }
+  else resetRun();
+  setTimeout(() => btnReset.classList.remove('active'), 120);
+}, { passive: false });
+
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+  touchLayer.classList.add('on');
+}
+
+function fitCanvas() {
+  const pad = 8;
+  const availW = window.innerWidth - pad * 2;
+  const availH = window.innerHeight - pad * 2;
+  const scale = Math.min(availW / W, availH / H);
+  canvas.style.width = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+  canvas.width = W;
+  canvas.height = H;
+}
+
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 200));
+fitCanvas();
+
+function updatePlayer(p, input, platforms) {
+  p.vx = 0;
+  if (input.left) { p.vx -= MOVE; p.facing = -1; }
+  if (input.right) { p.vx += MOVE; p.facing = 1; }
+
+  p.x += p.vx;
+  for (const pl of platforms) {
+    if (overlaps(p, pl)) {
+      if (p.vx > 0) p.x = pl.x - p.w;
+      else if (p.vx < 0) p.x = pl.x + pl.w;
+      p.vx = 0;
+    }
+  }
+
+  if (input.jump && p.onGround) { p.vy = JUMP; p.onGround = false; }
+
+  p.vy += GRAV;
+  if (p.vy > MAXFALL) p.vy = MAXFALL;
+  p.y += p.vy;
+
+  p.onGround = false;
+  for (const pl of platforms) {
+    if (overlaps(p, pl)) {
+      if (p.vy > 0) { p.y = pl.y - p.h; p.vy = 0; p.onGround = true; }
+      else if (p.vy < 0) { p.y = pl.y + pl.h; p.vy = 0; }
+    }
+  }
+
+  if (p.x < 0) p.x = 0;
+  if (p.x + p.w > W) p.x = W - p.w;
+}
+
+function markButtons(rect, pressed, lvl) {
+  for (let i = 0; i < lvl.buttons.length; i++) {
+    if (overlaps(rect, lvl.buttons[i])) pressed[i] = true;
+  }
+}
+
+function startLevel(i) {
+  state.levelIndex = i;
+  const lvl = LEVELS[i];
+  state.ghosts = [];
+  state.recording = [];
+  state.frame = 0;
+  state.player = makePlayer(lvl);
+  state.timer = lvl.time * FPS;
+  state.freeze = 40;
+  state.pressed = lvl.buttons.map(() => false);
+  state.doorOpen = lvl.doors.map(() => false);
+  state.status = 'playing';
+}
+
+function resetRun() {
+  if (state.status !== 'playing') return;
+  const lvl = LEVELS[state.levelIndex];
+
+  if (state.recording.length > 5) {
+    state.ghosts.push({
+      rec: state.recording,
+      color: GHOST_COLORS[state.ghosts.length % GHOST_COLORS.length]
+    });
+  }
+
+  state.recording = [];
+  state.frame = 0;
+  state.player = makePlayer(lvl);
+  state.timer = lvl.time * FPS;
+  state.freeze = 40;
+  state.pressed = lvl.buttons.map(() => false);
+  state.doorOpen = lvl.doors.map(() => false);
+}
+
+function advance() {
+  const next = state.levelIndex + 1;
+  if (next >= LEVELS.length) {
+    state.status = 'allcomplete';
+    return;
+  }
+  startLevel(next);
+}
+
+function tick() {
+  if (state.status !== 'playing') return;
+  if (state.freeze > 0) { state.freeze--; return; }
+
+  const lvl = LEVELS[state.levelIndex];
+
+  state.timer--;
+  if (state.timer <= 0) { resetRun(); return; }
+
+  const pressed = lvl.buttons.map(() => false);
+  for (const g of state.ghosts) {
+    const fr = g.rec[Math.min(state.frame, g.rec.length - 1)];
+    if (fr) markButtons({ x: fr.x, y: fr.y, w: PW, h: PH }, pressed, lvl);
+  }
+  markButtons(state.player, pressed, lvl);
+
+  const doorOpen = lvl.doors.map(() => false);
+  lvl.buttons.forEach((b, i) => { if (pressed[i]) doorOpen[b.door] = true; });
+
+  state.pressed = pressed;
+  state.doorOpen = doorOpen;
+
+  const platforms = lvl.platforms.concat(lvl.doors.filter((d, i) => !doorOpen[i]));
+  updatePlayer(state.player, readInput(), platforms);
+
+  state.recording.push({ x: state.player.x, y: state.player.y });
+  state.frame++;
+
+  if (overlaps(state.player, lvl.exit)) { advance(); return; }
+  if (state.player.y > H + 300) { resetRun(); return; }
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(120,160,220,0.045)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 45) {
+    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += 45) {
+    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); ctx.stroke();
+  }
+}
+
+function drawActor(x, y, color, alpha, glow) {
+  ctx.globalAlpha = alpha;
+  if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
+  ctx.fillStyle = color;
+  roundRect(x, y, PW, PH, 5);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(10,12,18,0.85)';
+  ctx.fillRect(x + 6, y + 10, 4, 5);
+  ctx.fillRect(x + 14, y + 10, 4, 5);
+  ctx.globalAlpha = 1;
+}
+
+function drawExit(e, t) {
+  const pulse = 0.5 + 0.5 * Math.sin(t / 280);
+  ctx.shadowColor = '#3ddc84';
+  ctx.shadowBlur = 14 + pulse * 14;
+  ctx.fillStyle = '#3ddc84';
+  roundRect(e.x, e.y, e.w, e.h, 6);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#0a0f14';
+  roundRect(e.x + 6, e.y + 6, e.w - 12, e.h - 12, 4);
+  ctx.fill();
+
+  ctx.globalAlpha = 0.35 + pulse * 0.45;
+  ctx.fillStyle = '#3ddc84';
+  roundRect(e.x + 13, e.y + 13, e.w - 26, e.h - 26, 3);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD(lvl) {
+  const pct = Math.max(0, state.timer / (lvl.time * FPS));
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  roundRect(20, 20, W - 40, 12, 6);
+  ctx.fill();
+
+  const barColor = pct > 0.35 ? '#4cc9f0' : (pct > 0.15 ? '#ffd166' : '#e5484d');
+  ctx.shadowColor = barColor;
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = barColor;
+  roundRect(20, 20, Math.max(0, (W - 40) * pct), 12, 6);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.fillStyle = '#93a1b5';
+  ctx.textAlign = 'left';
+  ctx.fillText(`BÖLÜM ${state.levelIndex + 1} · ${lvl.name.toUpperCase()}`, 20, 58);
+
+  ctx.textAlign = 'right';
+  const ghostLabel = `İKİZ: ${state.ghosts.length}`;
+  ctx.fillStyle = state.ghosts.length ? '#ff6b9d' : '#4a5568';
+  ctx.fillText(ghostLabel, W - 20, 58);
+
+  ctx.textAlign = 'center';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#3f4a5c';
+  ctx.fillText('← → hareket · BOŞLUK zıpla · R sıfırla', W / 2, H - 16);
+}
+
+function renderComplete(t) {
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+  drawGrid();
+
+  const pulse = 0.5 + 0.5 * Math.sin(t / 350);
+  ctx.textAlign = 'center';
+
+  ctx.shadowColor = '#3ddc84';
+  ctx.shadowBlur = 20 + pulse * 20;
+  ctx.fillStyle = '#3ddc84';
+  ctx.font = 'bold 52px system-ui, sans-serif';
+  ctx.fillText('TAMAMLANDI', W / 2, H / 2 - 30);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#93a1b5';
+  ctx.font = '18px system-ui, sans-serif';
+  ctx.fillText('Zamanın ikizlerini iyi kullandın.', W / 2, H / 2 + 24);
+
+  ctx.fillStyle = '#4cc9f0';
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.globalAlpha = 0.5 + pulse * 0.5;
+  ctx.fillText('Tekrar oynamak için R / 🔴 butonuna bas', W / 2, H / 2 + 76);
+  ctx.globalAlpha = 1;
+}
+
+function render(t) {
+  if (state.status === 'allcomplete') { renderComplete(t); return; }
+
+  const lvl = LEVELS[state.levelIndex];
+
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+  drawGrid();
+
+  for (const p of lvl.platforms) {
+    ctx.fillStyle = '#232d3d';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = '#39465c';
+    ctx.fillRect(p.x, p.y, p.w, 4);
+  }
+
+  lvl.doors.forEach((d, i) => {
+    const open = state.doorOpen[i];
+    if (open) {
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = '#3ddc84';
+      ctx.fillRect(d.x, d.y, d.w, d.h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(61,220,132,0.35)';
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(d.x + 0.5, d.y + 0.5, d.w - 1, d.h - 1);
+      ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = '#e5484d';
+      ctx.fillRect(d.x, d.y, d.w, d.h);
+      ctx.fillStyle = '#ff8189';
+      ctx.fillRect(d.x, d.y, 3, d.h);
+    }
+  });
+
+  lvl.buttons.forEach((b, i) => {
+    const on = state.pressed[i];
+    ctx.shadowColor = on ? '#3ddc84' : '#4cc9f0';
+    ctx.shadowBlur = on ? 16 : 8;
+    ctx.fillStyle = on ? '#3ddc84' : '#4cc9f0';
+    roundRect(b.x, b.y, b.w, b.h, 5);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    roundRect(b.x + 4, b.y + 3, b.w - 8, 3, 1.5);
+    ctx.fill();
+  });
+
+  for (const g of state.ghosts) {
+    const fr = g.rec[Math.min(state.frame, g.rec.length - 1)];
+    if (fr) drawActor(fr.x, fr.y, g.color, 0.42, 10);
+  }
+
+  drawExit(lvl.exit, t);
+
+  if (state.freeze <= 0) {
+    drawActor(state.player.x, state.player.y, '#4cc9f0', 1, 18);
+  }
+
+  if (state.freeze > 0) {
+    ctx.globalAlpha = Math.min(1, state.freeze / 40);
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#4cc9f0';
+    ctx.font = 'bold 44px system-ui, sans-serif';
+    ctx.shadowColor = '#4cc9f0';
+    ctx.shadowBlur = 20;
+    ctx.fillText(`BÖLÜM ${state.levelIndex + 1}`, W / 2, H / 2 - 6);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#93a1b5';
+    ctx.font = '17px system-ui, sans-serif';
+    ctx.fillText(lvl.name, W / 2, H / 2 + 32);
+  }
+
+  drawHUD(lvl);
+}
+
+let lastTime = 0;
+let acc = 0;
+
+function loop(t) {
+  if (!lastTime) lastTime = t;
+  let dt = t - lastTime;
+  lastTime = t;
+  if (dt > 200) dt = 200;
+  acc += dt;
+
+  while (acc >= 1000 / FPS) {
+    tick();
+    acc -= 1000 / FPS;
+  }
+
+  render(t);
+  requestAnimationFrame(loop);
+}
+
+startLevel(0);
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
